@@ -1,0 +1,39 @@
+{
+    "env": "house_4pumps",
+    "env_params": {
+        "start": [2021, 4, 23, 0, 0],
+        "stop": [2021, 4, 23, 10, 0],
+        "HPSamplingTime": 5,
+        "Hour_MPC_Horizon": 1,
+        "mu": 0,
+        "sigma": 0.5,
+        "cost_weights": {
+            "TempAbove": 0.01,
+            "TempBelow": 0.2,
+            "MinTemp": 50,
+            "Delta_TargetTemp": 0.5,
+            "Delta_Fan": 1,
+            "SpotGain": 0.1}
+    },
+
+    "agent": "House4Pumps_RLMPC_LSTD",
+    "agent_params":{
+        "cost_params": {"cost_defn": "custom",
+                       "theta_power_noise": 0,
+                       "theta_room_noise": [1, 1, 1, 1]},
+        "eps": 0.5,
+        "gamma": 0.9,
+        "actor_lr": 0.0001,
+        "train_params":{"iterations": 1,
+                        "batch_size": 100},
+        "experience_replay": false,
+        "constrained_updates": false,
+        "debug": false
+    },
+
+    "n_iterations": 3,
+    "n_trains": 1,
+    "n_steps": 0,
+    "n_evals": 1,
+    "buffer_maxlen": 100000
+}
