@@ -21,7 +21,7 @@ class Custom_QP_formulation:
         self.mpc_parameter = self.get_mpc_parameter_structure()
         self.lbG = None
         self.ubG = None
-        self.X0 = self.w(0)
+        self.X0 = self.w(0.01)
         self.dPi = None
         self.solver, self.dR_sensfunc = self.opt_formulation(self.w, self.mpc_parameter)
 
@@ -361,8 +361,9 @@ class Custom_MPCActor(Custom_QP_formulation):
         self.soln = None
         self.info = None
 
-    def act_forward(self, state: DM, act_wt=None, mode="train"):
+    def act_forward(self, state: DM, act_wt=None, time=None, mode="train"):
         act_wt = act_wt if act_wt is not None else self.actor_wt
+        time = time if time is not None else self.env.t
 
         for pump in self.pumps:
             self.mpc_parameter_value['state0', pump, 'Room'] = state[pump, 'Room']
@@ -370,15 +371,15 @@ class Custom_MPCActor(Custom_QP_formulation):
             self.mpc_parameter_value['state0', pump, 'TargetTemp'] = state[pump, 'TargetTemp']
             self.mpc_parameter_value['state0', pump, 'Fan'] = state[pump, 'Fan']
 
-        self.mpc_parameter_value['data', 'OutTemp'] = self.env.data['OutTemp'][self.env.t:self.env.t + self.N]
-        self.mpc_parameter_value['data', 'Spot'] = self.env.data['Spot'][self.env.t:self.env.t + self.N]
+        self.mpc_parameter_value['data', 'OutTemp'] = self.env.data['OutTemp'][time:time+self.N]
+        self.mpc_parameter_value['data', 'Spot'] = self.env.data['Spot'][time:time+self.N]
         for pump in self.pumps:
             self.mpc_parameter_value['data', 'DesiredTemp', :, pump] = self.env.data['DesiredTemp'][
-                                                                           pump][self.env.t:self.env.t + self.N]
+                                                                           pump][time:time+self.N]
             self.mpc_parameter_value['data', 'MinTemp', :, pump] = self.env.data['MinTemp'][
-                                                                       pump][self.env.t:self.env.t + self.N]
+                                                                       pump][time:time+self.N]
             self.mpc_parameter_value['data', 'MaxFan', :, pump] = self.env.data['MaxFan'][
-                                                                      pump][self.env.t:self.env.t + self.N]
+                                                                      pump][time:time+self.N]
 
         self.mpc_parameter_value['theta'] = act_wt
 
@@ -472,7 +473,7 @@ class Custom_MPCActor(Custom_QP_formulation):
             # act[pump, 'On'] = opt_var['Input', 0, pump, 'On']
 
         ### add time info as additional infos
-        self.info = {"soln": self.soln, "time": self.env.t, "act_wt": act_wt}
+        self.info = {"soln": self.soln, "time": time, "act_wt": act_wt}
 
         if self.debug:
             print("Soln:")
@@ -555,32 +556,44 @@ class House_4Pumps_MPCAgent(TrainableController):
         self.obs_dim = self.env.state_struct.shape[0]
         self.action_dim = self.env.action_struct.shape[0]
 
-        ### Critic params
-        dim_sfeature = int(2 * self.obs_dim + 1)
-        ### dim_sfeature = (self.obs_dim + 2)*(self.obs_dim + 1)/2  ### if consider cross terms, use this formula
-        self.critic_wt = 0.01 * np.random.rand(dim_sfeature, 1)
-        self.adv_wt = 0.01 * np.random.rand(self.actor.actor_wt.shape[0], 1)
+        ### Critic params initialization
+        # dim_sfeature = int(2 * self.obs_dim + 1)
+        dim_sfeature = int((self.obs_dim + 2)*(self.obs_dim + 1)/2)  ### if consider cross terms, use this formula
+        self.vi = 0.00001 * np.random.randn(dim_sfeature, 1)
+        self.omega = 0.00001 * np.random.randn(self.actor.actor_wt.shape[0], 1)
+        self.nu = 0.00001 * np.random.randn(self.actor.actor_wt.shape[0], 1)
+        self.adam_m = 0
+        self.adam_n = 0
+
+        self.num_policy_update = 0
+
+        self.theta_bound = np.concatenate((np.zeros(6), -np.ones(4)*np.inf, np.zeros(36)))
 
         ### Render prep
         self.fig = None
         self.ax = None
 
-    def state_to_feature(self, state):
-        S = np.diag(np.outer(state, state))
-        S = np.concatenate((S, state, np.array([1.0])))
-        return S
+    def _parse_agent_params(self, cost_params, eps, gamma, actor_lr, nu_lr, vi_lr, omega_lr, policy_delay, debug,
+                            train_params):
+        self.cost_params = cost_params
+        self.eps = eps
+        self.gamma = gamma
+        self.actor_lr = actor_lr
+        self.nu_lr = nu_lr
+        self.vi_lr = vi_lr
+        self.omega_lr = omega_lr
+        self.policy_delay = policy_delay
+        self.debug = debug
+        self.iterations = train_params["iterations"]
+        self.batch_size = train_params["batch_size"]
 
-    def get_value(self, state):
-        S = self.state_to_feature(state)
-        V = S.dot(self.critic_wt)
-        return V
-
-    def get_action(self, state: DM, act_wt=None, mode="train"):
+    def get_action(self, state: DM, act_wt=None, time=None, mode="train"):
         eps = self.eps if mode == "train" else 0.0
 
-        act, info = self.actor.act_forward(state, act_wt=act_wt, mode=mode)
+        act, info = self.actor.act_forward(state, act_wt=act_wt, time=time, mode=mode)
 
-        act = self.env.action_struct(act.cat + eps * np.random.rand(self.action_dim) * [8, 1, 8, 1, 8, 1, 8, 1])
+        act = self.env.action_struct(act.cat +
+                                     eps * (-0.5 + np.random.rand(self.action_dim)) * [8, 1, 8, 1, 8, 1, 8, 1])
 
         for pump in self.pumps:
             act[pump, 'Delta_TargetTemp'] = np.clip(act[pump, 'Delta_TargetTemp'],
@@ -594,88 +607,96 @@ class House_4Pumps_MPCAgent(TrainableController):
             #                           self.env.action_space[pump]['On']['high'])
         return act, info
 
+    def state_to_feature(self, state):
+        SS = np.triu(np.outer(state, state))
+        size = state.shape[0]
+        phi_s = []
+        for row in range(size):
+            for col in range(row, size):
+                phi_s.append(SS[row][col])
+        phi_s = np.concatenate((phi_s, state, 1.0), axis=None)[:, None]
+        return phi_s
+
+    def get_V_value(self, phi_s):
+        V = np.matmul(phi_s.T, self.vi)
+        return V
+
+    def state_action_to_feature(self, action, pi, dpi_dtheta):
+        phi_sa = np.matmul(dpi_dtheta, (action-pi))
+        return phi_sa
+
+    def get_Q_value(self, phi_sa, V):
+        Q = np.matmul(phi_sa.T, self.omega) + V
+        return Q
+
     def train(self, replay_buffer, train_it):
-        # for critic param update
-        Av = np.zeros(shape=(self.critic_wt.shape[0], self.critic_wt.shape[0]))
-        bv = np.zeros(shape=(self.critic_wt.shape[0], 1))
-        # for advantage fn param
-        Aq = np.zeros(shape=(self.adv_wt.shape[0], self.adv_wt.shape[0]))
-        bq = np.zeros(shape=(self.adv_wt.shape[0], 1))
-        G = np.zeros(shape=(self.adv_wt.shape[0], self.adv_wt.shape[0]))
-
-        for _ in tqdm_context(range(train_it), desc="Training Iterations"):
+        delta_dpidpi = 0
+        for train_i in tqdm_context(range(train_it), desc="Training Iterations"):
+            print(f'batch training iteration {train_i}')
             states, actions, rewards, next_states, dones, infos = replay_buffer.sample(self.batch_size)
+            delta_nu = 0
+            delta_vi = 0
+            delta_omega = 0
             for j, s in enumerate(states):
+                # all info need for (s,a)
                 s_array = s.cat.full().squeeze()
-                S = self.state_to_feature(np.array(s_array).squeeze())[:, None]
-                next_states_j_array = next_states[j].cat.full().squeeze()
-                temp = S - (1 - dones[j]) * self.gamma * self.state_to_feature(next_states_j_array)[:, None]
-                Av += np.matmul(S, temp.T)
-                bv += rewards[j] * S
+                phi_s = self.state_to_feature(s_array)
+                V_s = self.get_V_value(phi_s)
+                info_s = infos[j]
+                pi_s = info_s["soln"]["x"].full()[: self.action_dim]
+                action_s = actions[j].cat.full()
+                dpi_dtheta_s = self.actor.dPidP(s, info_s["act_wt"], info_s)
+                phi_sa = self.state_action_to_feature(action_s, pi_s, dpi_dtheta_s)
+                Q_sa = self.get_Q_value(phi_sa, V_s)
 
-                if self.experience_replay:  # use current theta to generate new data
-                    self.env.t = infos[j]["time"]
-                    pi_act, info = self.get_action(s, self.actor.actor_wt, mode="update")
-                    pi_act = pi_act.cat.full()
-                    jacob_pi = self.actor.dPidP(s, self.actor.actor_wt, info)
-                    actions[j] = info["soln"]["x"].full()[: self.action_dim]
-                else:  # use old data
-                    info = infos[j]
-                    soln = info["soln"]
-                    pi_act = soln["x"].full()[: self.action_dim]
-                    jacob_pi = self.actor.dPidP(s, info["act_wt"], info)
-                    actions[j] = actions[j].cat.full()
+                # all info need for (s', pi_s')
+                ns = next_states[j]
+                ns_array = ns.cat.full().squeeze()
+                phi_ns = self.state_to_feature(ns_array)
+                V_ns = self.get_V_value(phi_ns)
+                # action_ns, info_ns = self.get_action(ns, act_wt=self.actor.actor_wt, time=info_s["time"]+1)
+                # pi_ns = info_ns["soln"]["x"].full()[: self.action_dim]
+                # dpi_dtheta_ns = self.actor.dPidP(ns, info_ns["act_wt"], info_ns)
+                # phi_nsna = self.state_action_to_feature(action_s, pi_s, dpi_dtheta_s)
 
-                    ### rescale jacob_pi
-                    # jacob_pi[3, :] = jacob_pi[3, :] * 10**(-16)
-                    # jacob_pi[4, :] = jacob_pi[4, :] * 10**(-16)
-                    jacob_pi[0:3, :] = jacob_pi[0:3, :] * 10 ** 16
-                    jacob_pi[5:, :] = jacob_pi[5:, :] * 10 ** 16
+                td_error = rewards[j] + self.gamma * V_ns - Q_sa
+                delta_nu += ((td_error - np.matmul(phi_sa.T, self.nu)) * phi_sa) / self.batch_size
+                delta_vi += (td_error * phi_s - self.gamma * np.matmul(phi_sa.T, self.nu) * phi_ns) / self.batch_size
+                delta_omega += (td_error * phi_sa) / self.batch_size
+                # delta_vi += (td_error * phi_s) / self.batch_size
+                # delta_omega += (td_error * phi_sa) / self.batch_size
+                delta_dpidpi += np.matmul(dpi_dtheta_s, dpi_dtheta_s.T)
 
-                psi = np.matmul(jacob_pi, (actions[j] - pi_act))
+            # delta_nu = delta_nu / self.batch_size
+            # delta_vi = delta_vi / self.batch_size
+            # delta_omega = delta_omega / self.batch_size
 
-                Aq += np.matmul(psi, psi.T)
-                bq += psi * (rewards[j] + (1 - dones[j]) * self.gamma * self.get_value(
-                    next_states_j_array) - self.get_value(s_array))
+            print(f'update critic')
+            self.nu = self.nu + self.nu_lr * delta_nu
+            self.vi = self.vi + self.vi_lr * delta_vi
+            self.omega = self.omega + self.omega_lr * delta_omega
+            # print(f'self.nu = {self.nu.squeeze()}')
+            print(f'td_error = {td_error}')
+            # print(f'delta_vi = {delta_vi.squeeze()}')
+            # print(f'self.vi = {self.vi.squeeze()}')
+            # print(f'self.omega = {self.omega.squeeze()}')
 
-                G += np.matmul(jacob_pi, jacob_pi.T)
-
-        self.critic_wt = np.linalg.solve(Av, bv)
-        # print(f'self.critic_wt = {self.critic_wt}')
-
-        ### debug for Aq
-        # aa = np.linalg.det(Aq)
-        # bb = np.linalg.matrix_rank(Aq)
-
-        if np.linalg.det(Aq) != 0.0:
-            print(f'params get updated')
-            self.adv_wt = np.linalg.solve(Aq, bq)
-
-            if self.constrained_updates:
-                self.actor.actor_wt = self.actor.param_update(
-                    self.actor_lr / self.batch_size,
-                    np.matmul(G, self.adv_wt),
-                    self.actor.actor_wt)
-            else:
-                # self.actor.actor_wt -= (self.actor_lr / self.batch_size) * np.matmul(G, self.adv_wt)
-                gradient_J_theta = np.matmul(G, self.adv_wt)
-                new_theta = self.actor.actor_wt.cat.full() - (self.actor_lr / self.batch_size) * gradient_J_theta
-                self.actor.actor_wt = self.actor.actor_wt_structure(new_theta)
-                print(f'delta_theta = {np.squeeze((self.actor_lr / self.batch_size) * gradient_J_theta)}')
-
-            print(f'self.actor.actor_wt = {self.actor.actor_wt.cat}')
-
-    def _parse_agent_params(self, cost_params, eps, gamma, actor_lr, debug,
-                            train_params, constrained_updates, experience_replay):
-        self.cost_params = cost_params
-        self.eps = eps
-        self.gamma = gamma
-        self.actor_lr = actor_lr
-        self.constrained_updates = constrained_updates
-        self.experience_replay = experience_replay
-        self.debug = debug
-        self.iterations = train_params["iterations"]
-        self.batch_size = train_params["batch_size"]
+            if (train_i+1) % self.policy_delay == 0:
+                print(f'update actor')
+                dpi_dpidpi_avg = delta_dpidpi / ((train_i+1) * self.batch_size)
+                delta_theta = np.matmul(dpi_dpidpi_avg, self.omega)
+                delta_dpidpi = 0
+                self.num_policy_update += 1
+                # Adam
+                self.adam_m = 0.9 * self.adam_m + (1-0.9) * delta_theta
+                m_hat = self.adam_m / (1-0.9**self.num_policy_update)
+                self.adam_n = 0.999 * self.adam_n + (1-0.999) * delta_theta**2
+                n_hat = self.adam_n / (1-0.999**self.num_policy_update)
+                new_theta = self.actor.actor_wt.cat.full() - self.actor_lr * (m_hat / (np.sqrt(n_hat)+10**(-8)))
+                constrained_new_theta = np.maximum(new_theta.squeeze(), self.theta_bound)
+                self.actor.actor_wt = self.actor.actor_wt_structure(constrained_new_theta)
+                print(f'self.actor.actor_wt = {self.actor.actor_wt.cat}')
+        # print('hi')
 
 
 ### test
@@ -686,7 +707,7 @@ if __name__ == "__main__":
     import json
     from replay_buffer import BasicBuffer
 
-    json_path = os.path.abspath(os.path.join(os.getcwd(), '../../Settings/other/house_4pumps_rl_mpc_lstd.json'))
+    json_path = os.path.abspath(os.path.join(os.getcwd(), '../../Settings/other/house_4pumps_rl_mpc_cddac.json'))
     with open(json_path, 'r') as f:
         params = json.load(f)
         params["env_params"]["json_path"] = json_path
@@ -704,4 +725,3 @@ if __name__ == "__main__":
 
     ### test Smart_Home_MPCAgent
     c = House_4Pumps_MPCAgent(env, params["agent_params"])
-    c.get_action(env.reset())
