@@ -1,11 +1,4 @@
 import numpy as np
-from gym.spaces.box import Box
-import casadi as ca
-import math
-import matplotlib.pyplot as plt
-from Project.Environments.smart_home import SmartHome
-import json
-
 ''''Gaussian plot'''
 # u = 0  # 均值μ
 # sig = math.sqrt(9)  # 标准差δ
@@ -70,7 +63,21 @@ import json
 # print(n_states1, n_states2)
 
 import casadi as csd
-Q = csd.SX.sym("theta_Q", 2, 2)
-a = Q[:]
-print(Q)
-print(a)
+
+
+# def state_to_feature(state):
+#     SS = np.triu(np.outer(state, state))
+#     size = state.shape[0]
+#     phi_s = []
+#     for row in range(size):
+#         for col in range(row, size):
+#             phi_s.append(SS[row][col])
+#     phi_s = np.concatenate((phi_s, state, 1.0), axis=None)
+#     return phi_s
+#
+# a = state_to_feature(np.array([1, 3]))
+# print(a)
+
+a = np.array([[1], [2], [3]])
+print(a.squeeze())
+print(np.maximum(a.squeeze(), np.array([0, 0, 0])))

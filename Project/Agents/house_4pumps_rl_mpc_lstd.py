@@ -615,10 +615,10 @@ class House_4Pumps_MPCAgent(TrainableController):
 
                 if self.experience_replay:  # use current theta to generate new data
                     self.env.t = infos[j]["time"]
-                    pi_act, info = self.get_action(s, self.actor.actor_wt, mode="update")
-                    pi_act = pi_act.cat.full()
+                    act, info = self.get_action(s, self.actor.actor_wt)
+                    actions[j] = act.cat.full()
                     jacob_pi = self.actor.dPidP(s, self.actor.actor_wt, info)
-                    actions[j] = info["soln"]["x"].full()[: self.action_dim]
+                    pi_act = info["soln"]["x"].full()[: self.action_dim]
                 else:  # use old data
                     info = infos[j]
                     soln = info["soln"]

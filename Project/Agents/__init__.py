@@ -16,7 +16,8 @@ class AgentFactory:
         "QPlearning_MPC": [".qplearning_mpc", "QPlearning_MPC_Agent"],
         "MPC_AC": [".mpc_ac", "MPC_AC_Agent_exp"],
         "SmartHome_RLMPC_LSTD": [".smart_home_rl_mpc_lstd", "Smart_Home_MPCAgent"],
-        "House4Pumps_RLMPC_LSTD": [".house_4pumps_rl_mpc_lstd", "House_4Pumps_MPCAgent"]
+        "House4Pumps_RLMPC_LSTD": [".house_4pumps_rl_mpc_lstd", "House_4Pumps_MPCAgent"],
+        "House4Pumps_RLMPC_CDDAC": [".house_4pumps_rl_mpc_cddac", "House_4Pumps_MPCAgent"]
     }
     agent = None
 

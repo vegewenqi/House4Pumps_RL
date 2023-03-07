@@ -8,14 +8,11 @@ def rollout_sample(env, agent, replay_buffer, n_step, mode="train"):
     state = env.reset()
     # once execute rollout_sample，run env.reset(), reset state and t
     rollout_return = 0
-    rendering = True if mode == "final" and env.supports_rendering else False
-    if rendering:
-        env.prepare_for_render()
 
     # get action, env.step, buffer.push
     for step in tqdm_context(range(n_step), desc="Episode", pos=1):
-        print(f'step {step}-------------')
-        action, add_info = agent.get_action(state, mode=mode)
+        print(f'evaluation step {step}-------------')
+        action, add_info = agent.get_action(state, time=env.t, mode=mode)
         next_state, reward, done, power_info = env.step(action)
         add_info['power_info'] = power_info  # extra power info for the house4pumps project
 
@@ -33,15 +30,8 @@ def rollout_sample(env, agent, replay_buffer, n_step, mode="train"):
 
         rollout_return += reward
 
-        if rendering:
-            env.render()
-            print(state, next_state, action, reward, done)
-
         # state = next_state.copy()
         state = next_state
-
-    if rendering:
-        env.end_render()
 
     return rollout_return
 
