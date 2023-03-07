@@ -60,7 +60,7 @@ for it in tqdm_context(range(params["n_iterations"]), desc="Iterations", pos=3):
             eval_return = []
             for eval_runs in tqdm_context(range(params["n_evals"]), desc="Evaluation Rollouts"):
                 rollout_return = rollout_sample(env_evaluate, agent, replay_buffer, params["epi_length"], mode="eval")
-            eval_return.append(rollout_return)
+                eval_return.append(rollout_return)
             eval_returns.append(mean(eval_return))
             print(f"Evaluation returns: {eval_returns}")
 

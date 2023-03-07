@@ -12,7 +12,8 @@ def rollout_sample(env, agent, replay_buffer, n_step, mode="train"):
     # get action, env.step, buffer.push
     for step in tqdm_context(range(n_step), desc="Episode", pos=1):
         print(f'evaluation step {step}-------------')
-        action, add_info = agent.get_action(state, time=env.t, mode=mode)
+        # action, add_info = agent.get_action(state, time=env.t, mode=mode)
+        action, add_info = agent.get_action(state, mode=mode)
         next_state, reward, done, power_info = env.step(action)
         add_info['power_info'] = power_info  # extra power info for the house4pumps project
 
